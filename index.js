@@ -4,7 +4,6 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // Middleware to parse incoming JSON bodies and allow CORS
-// This is crucial for allowing the calculator to talk to this server.
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
@@ -20,12 +19,13 @@ const SHOPIFY_STORE_DOMAIN = process.env.SHOPIFY_STORE_DOMAIN;
 
 // A simple route to check if the server is alive
 app.get('/', (req, res) => {
-  res.send('Seedlink Shopify Backend is running and ready.');
+  res.send('Seedlink Shopify Backend is running and ready. (v2)');
 });
 
 // The main endpoint that will create the draft order
 app.post('/create-draft-order', async (req, res) => {
-  // Check if API keys are configured on the server
+  console.log("Received request to /create-draft-order");
+
   if (!SHOPIFY_ADMIN_ACCESS_TOKEN || !SHOPIFY_STORE_DOMAIN) {
     console.error('Server is missing Shopify credentials.');
     return res.status(500).json({ error: 'Server is not configured with Shopify credentials.' });
@@ -35,11 +35,12 @@ app.post('/create-draft-order', async (req, res) => {
     const { variantId, budgetData } = req.body;
 
     if (!variantId || !budgetData) {
+      console.log("Request failed: Missing variantId or budgetData.");
       return res.status(400).json({ error: 'Missing variantId or budgetData in request.' });
     }
     
-    // The data sent from the calculator is already a base64 string
-    const decodedData = atob(budgetData);
+    // Use Buffer for more robust Base64 decoding
+    const decodedDataString = Buffer.from(budgetData, 'base64').toString('utf-8');
 
     // Prepare the line item with custom properties for the draft order
     const lineItems = [
@@ -49,7 +50,7 @@ app.post('/create-draft-order', async (req, res) => {
         properties: [
           {
             name: "_budget_data",
-            value: decodedData, // Use the decoded, human-readable data
+            value: decodedDataString, 
           }
         ]
       }
@@ -63,6 +64,7 @@ app.post('/create-draft-order', async (req, res) => {
     };
 
     const shopifyApiUrl = `https://${SHOPIFY_STORE_DOMAIN}/admin/api/2024-04/draft_orders.json`;
+    console.log("Sending request to Shopify API:", shopifyApiUrl);
 
     // Make the API call to Shopify
     const shopifyResponse = await fetch(shopifyApiUrl, {
@@ -77,16 +79,17 @@ app.post('/create-draft-order', async (req, res) => {
     const responseData = await shopifyResponse.json();
 
     if (!shopifyResponse.ok) {
-      console.error('Shopify API Error:', responseData);
-      throw new Error('Failed to create draft order on Shopify.');
+      // Log the detailed error from Shopify for debugging
+      console.error('Shopify API Error:', JSON.stringify(responseData, null, 2));
+      throw new Error(responseData.errors ? JSON.stringify(responseData.errors) : 'Failed to create draft order on Shopify.');
     }
     
-    // Send the secure invoice URL (checkout link) back to the client
+    console.log("Successfully created draft order. Invoice URL:", responseData.draft_order.invoice_url);
     res.status(200).json({ invoiceUrl: responseData.draft_order.invoice_url });
 
   } catch (error) {
-    console.error('Error creating draft order:', error);
-    res.status(500).json({ error: 'An internal server error occurred.' });
+    console.error('Final error in catch block:', error.message);
+    res.status(500).json({ error: `An internal server error occurred: ${error.message}` });
   }
 });
 
