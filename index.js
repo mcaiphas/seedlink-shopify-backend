@@ -4,12 +4,14 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // Middleware to parse incoming JSON bodies and allow CORS
-app.use(express.json());
+// This is crucial for allowing the calculator to talk to this server.
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, PUT, DELETE');
   next();
 });
+app.use(express.json());
 
 
 // Get Shopify credentials from environment variables
@@ -18,7 +20,7 @@ const SHOPIFY_STORE_DOMAIN = process.env.SHOPIFY_STORE_DOMAIN;
 
 // A simple route to check if the server is alive
 app.get('/', (req, res) => {
-  res.send('Seedlink Shopify Backend is running.');
+  res.send('Seedlink Shopify Backend is running and ready.');
 });
 
 // The main endpoint that will create the draft order
@@ -35,6 +37,9 @@ app.post('/create-draft-order', async (req, res) => {
     if (!variantId || !budgetData) {
       return res.status(400).json({ error: 'Missing variantId or budgetData in request.' });
     }
+    
+    // The data sent from the calculator is already a base64 string
+    const decodedData = atob(budgetData);
 
     // Prepare the line item with custom properties for the draft order
     const lineItems = [
@@ -44,7 +49,7 @@ app.post('/create-draft-order', async (req, res) => {
         properties: [
           {
             name: "_budget_data",
-            value: budgetData,
+            value: decodedData, // Use the decoded, human-readable data
           }
         ]
       }
