@@ -1,14 +1,13 @@
-{
-  "name": "seedlink-shopify-backend",
-  "version": "1.0.0",
-  "description": "Backend server for Seedlink Shopify integration",
-  "main": "index.js",
-  "scripts": {
-    "start": "node index.js"
-  },
-  "dependencies": {
-    "express": "^4.19.2"
-  },
-  "author": "",
-  "license": "ISC"
-}
+const express = require('express');
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+app.get('/', (req, res) => {
+  res.send('Hello World! Your Seedlink server is running.');
+});
+
+app.listen(PORT, () => {
+  console.log(`Server is running on port ${PORT}`);
+});
+
+module.exports = app;
