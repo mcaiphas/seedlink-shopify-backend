@@ -2,18 +2,17 @@ const express = require('express');
 const fetch = require('node-fetch');
 const { jsPDF } = require("jspdf");
 require('jspdf-autotable');
+const cors = require('cors'); // Import the cors package
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Middleware to parse incoming JSON bodies and allow CORS
-app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, PUT, DELETE');
-  next();
-});
-app.use(express.json({ limit: '10mb' })); // Increase payload limit for large orders
+// Use the cors middleware to handle all CORS issues
+app.use(cors());
+
+// Middleware to parse incoming JSON bodies
+app.use(express.json({ limit: '10mb' })); 
+
 
 // Get Shopify credentials from environment variables
 const SHOPIFY_ADMIN_ACCESS_TOKEN = process.env.SHOPIFY_ADMIN_ACCESS_TOKEN;
@@ -106,9 +105,55 @@ function createReportPdf(budgetResults) {
 
 // --- API Endpoints ---
 app.get('/', (req, res) => {
-  res.send('Seedlink Shopify Backend is running and ready. (v6)');
+  res.send('Seedlink Shopify Backend is running and ready. (v7)');
 });
 
+app.post('/create-draft-order', async (req, res) => {
+  if (!SHOPIFY_ADMIN_ACCESS_TOKEN || !SHOPIFY_STORE_DOMAIN) {
+    return res.status(500).json({ error: 'Server is not configured with Shopify credentials.' });
+  }
+
+  try {
+    const { variantId, budgetData } = req.body;
+    if (!variantId || !budgetData) {
+      return res.status(400).json({ error: 'Missing variantId or budgetData.' });
+    }
+    
+    const decodedDataString = Buffer.from(budgetData, 'base64').toString('utf-8');
+
+    const lineItems = [{
+      variant_id: variantId,
+      quantity: 1,
+      properties: [{ name: "_budget_data", value: decodedDataString }]
+    }];
+
+    const draftOrderData = { draft_order: { line_items: lineItems } };
+    const shopifyApiUrl = `https://${SHOPIFY_STORE_DOMAIN}/admin/api/2024-04/draft_orders.json`;
+
+    const shopifyResponse = await fetch(shopifyApiUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Shopify-Access-Token': SHOPIFY_ADMIN_ACCESS_TOKEN,
+      },
+      body: JSON.stringify(draftOrderData),
+    });
+
+    const responseData = await shopifyResponse.json();
+    if (!shopifyResponse.ok) {
+      throw new Error(responseData.errors ? JSON.stringify(responseData.errors) : 'Failed to create draft order.');
+    }
+    
+    res.status(200).json({ invoiceUrl: responseData.draft_order.invoice_url });
+
+  } catch (error) {
+    console.error('Error in /create-draft-order:', error);
+    res.status(500).json({ error: `Server error: ${error.message}` });
+  }
+});
+
+
+// New Endpoint for Shopify Flow to trigger PDF delivery
 app.post('/generate-and-deliver-pdf', async (req, res) => {
     console.log("Received fulfillment request from Shopify Flow.");
     // Acknowledge the request immediately to prevent Flow from timing out
@@ -135,13 +180,13 @@ app.post('/generate-and-deliver-pdf', async (req, res) => {
 
         const budgetLineItem = orderData.line_items.find(item => item.variant_id && item.variant_id.toString() === SHOPIFY_VARIANT_ID);
         if (!budgetLineItem) {
-            console.log(`Order ${orderId} does not contain the budget product. Skipping.`);
+            console.log(`Order ${orderData.id} does not contain the budget product. Skipping.`);
             return;
         }
 
         const budgetProperty = budgetLineItem.properties.find(prop => prop.name === '_budget_data');
         if (!budgetProperty || !budgetProperty.value) {
-            console.error(`Budget data missing on line item for order ${orderId}.`);
+            console.error(`Budget data missing on line item for order ${orderData.id}.`);
             return;
         }
 
@@ -199,8 +244,6 @@ app.post('/generate-and-deliver-pdf', async (req, res) => {
               }],
               notifyCustomer: true,
               trackingInfo: { company: "Digital Download" },
-              // This is where you would attach if the digital downloads app supports it
-              // For now, we will rely on the app to detect the product
             }
           }
         };
